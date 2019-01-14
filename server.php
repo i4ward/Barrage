@@ -6,6 +6,7 @@
 class myswoole{
     private $ws;   //websocket连接句柄
     private $red;  //redis连接句柄
+    private $grava=["猎空","黑百合","托比昂","死神","秩序之光","禅雅塔","麦克雷","查莉娅","半藏","美"];
     public function __construct() {
         $this->myredis();      // 连接redis
         $this->mywebsocket(); // 开启websocket服务器
@@ -33,20 +34,52 @@ class myswoole{
         //监听连接打开时间
         $this->ws->on('open', function($ws, $request){
             echo "【date：".date("Y-m-d H:i:s",time())."】client ".$request->fd." has established...\n";
+            $info = [
+                'totalV'=>$this->red->get('totalVisit'),
+                'totalM'=>$this->red->get('totalMsg'),
+                'online'=>count($this->ws->connections)
+            ];
+           // $this->ws->push($request->fd, json_encode((object)$info));
+            foreach($this->ws->connections as $id){
+                $this->ws->push($id, json_encode((object)$info));
+            }
             $msg = $this->red->lrange(date("Y-m-d",time()),0,-1);
-            $this->ws->push($request->fd,json_encode((object)$msg));
+            $response = array();
+            foreach($msg as $m){
+                $response = array_merge($response,json_decode($m,true));
+            }
+            $this->ws->push($request->fd, json_encode((object)$response));
+            $this->red->incr("totalVisit"); //总访问量
         });
         //监听WebSocket消息事件
         $this->ws->on('message', function($ws, $frame){
             echo "【data：".date("Y-m-d H:i:s",time())."】 Message: {$frame->data} \n";
-            $this->red->lpush(date("Y-m-d",time()),$frame->data);
+            $this->red->incr("totalMsg"); //总访问量
+            $id = ($frame->fd)%10;
+            $msg[] = [
+                "id"=>'images/echo/'.$id.'.jpg',
+                "grava"=>$this->grava[$id],
+                "message"=>$frame->data
+            ];
+            $msg = json_encode((object)$msg);
+            $this->red->lpush(date("Y-m-d",time()),$msg);
             foreach($this->ws->connections as $id){
-                $this->ws->push($id, json_encode((object)$frame->data));
+                $this->ws->push($id, $msg);
             }
         });
         //监听WebSocket连接关闭事件
         $this->ws->on('close', function($ws, $fd){
-            echo "【date：".date("Y-m-d H:i:s",time())."】client ".$fd." has established...\n";
+            echo "【date：".date("Y-m-d H:i:s",time())."】client ".$fd." has closed...\n";
+       $info = [
+                'totalV'=>$this->red->get('totalVisit'),
+                'totalM'=>$this->red->get('totalMsg'),
+                'online'=>count($this->ws->connections)-1
+            ];
+            //$this->ws->push($request->fd, json_encode((object)$info));
+            foreach($this->ws->connections as $id){
+              if($id==$fd) continue; 
+             $this->ws->push($id, json_encode((object)$info));
+            }
         });
         //开启服务
         $this->ws->start();
@@ -55,7 +88,8 @@ class myswoole{
     public function myredis(){
         $this->red = new Redis();
         $this->red->connect('127.0.0.1','6379');
-        $this->red->select(5);
+       $this->red->auth('itzane');
+	 // $this->red->select(1);
         echo "【date：".date("Y-m-d H:i:s",time())."】redis service has started...\n";
 
     }
